@@ -51,10 +51,6 @@ impl Value {
 
         let parents = self.inner.lock().unwrap().parents.clone();
 
-        result.push(Value {
-            inner: Arc::clone(&self.inner),
-        });
-
         for parent in parents {
             let parent_value = Value {
                 inner: Arc::clone(&parent),
@@ -62,12 +58,17 @@ impl Value {
 
             parent_value.build_topo(result, visited);
         }
+
+        result.push(Value {
+            inner: Arc::clone(&self.inner),
+        });
     }
 
     pub fn back_prop(&self) {
         self.inner.lock().unwrap().grad = 1.0;
 
-        let topo = self.topalogical_sort();
+        let mut topo = self.topalogical_sort();
+        topo.reverse();
 
         for val in topo {
             let f = val.inner.lock().unwrap()._backward.clone();
@@ -144,7 +145,7 @@ impl Value {
         out_value
     }
 
-    pub fn powi(self, exp: i32) -> Value {
+    pub fn powi(&self, exp: i32) -> Value {
         let out = self.inner.lock().unwrap().data.powi(exp);
         let out_value = Value::new(out);
 
@@ -159,6 +160,50 @@ impl Value {
         {
             let mut inner = out_value.inner.lock().unwrap();
             inner.op = format!("powi({})", exp).to_string();
+            inner.parents = vec![Arc::clone(&self.inner)];
+            inner._backward = Some(Arc::new(backward));
+        }
+
+        out_value
+    }
+
+    pub fn exp(&self) -> Value {
+        let out = self.inner.lock().unwrap().data.exp();
+        let out_value = Value::new(out);
+
+        let out_inner = Arc::clone(&out_value.inner);
+        let self_inner = Arc::clone(&self.inner);
+
+        let backward = move || {
+            let exp_deriv = out;
+            self_inner.lock().unwrap().grad = exp_deriv * out_inner.lock().unwrap().grad;
+        };
+
+        {
+            let mut inner = out_value.inner.lock().unwrap();
+            inner.op = "exp".to_string();
+            inner.parents = vec![Arc::clone(&self.inner)];
+            inner._backward = Some(Arc::new(backward));
+        }
+
+        out_value
+    }
+
+    pub fn ln(&self) -> Value {
+        let out = self.inner.lock().unwrap().data.ln();
+        let out_value = Value::new(out);
+
+        let out_inner = Arc::clone(&out_value.inner);
+        let self_inner = Arc::clone(&self.inner);
+
+        let backward = move || {
+            let ln_deriv = 1.0 / self_inner.lock().unwrap().data;
+            self_inner.lock().unwrap().grad = ln_deriv * out_inner.lock().unwrap().grad;
+        };
+
+        {
+            let mut inner = out_value.inner.lock().unwrap();
+            inner.op = "ln".to_string();
             inner.parents = vec![Arc::clone(&self.inner)];
             inner._backward = Some(Arc::new(backward));
         }
@@ -225,7 +270,9 @@ impl Sub for Value {
     type Output = Value;
 
     fn sub(self, rhs: Value) -> Value {
-        let data = self.inner.lock().unwrap().data - rhs.inner.lock().unwrap().data;
+        let a = self.inner.lock().unwrap().data;
+        let b = rhs.inner.lock().unwrap().data;
+        let data = a - b;
         let new_value = Value::new(data);
 
         let self_inner = Arc::clone(&self.inner);
@@ -233,9 +280,10 @@ impl Sub for Value {
         let new_value_inner = Arc::clone(&new_value.inner);
 
         let backward = move || {
-            let new_value_grad = new_value_inner.lock().unwrap().grad;
-            self_inner.lock().unwrap().grad += new_value_grad;
-            rhs_inner.lock().unwrap().grad -= new_value_grad;
+            let new_grad = new_value_inner.lock().unwrap().grad;
+
+            self_inner.lock().unwrap().grad += new_grad;
+            rhs_inner.lock().unwrap().grad -= new_grad;
         };
 
         {
