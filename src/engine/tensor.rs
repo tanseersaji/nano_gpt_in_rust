@@ -1,7 +1,8 @@
-use std::{array, fmt::Display, process::Command, usize};
+use std::{array, fmt::Display};
 
 use crate::engine::value::Value;
 
+#[derive(Clone)]
 pub struct Tensor<const ROW: usize, const COL: usize> {
     data: [[Value; COL]; ROW],
 }
@@ -25,6 +26,10 @@ impl<const ROW: usize, const COL: usize> Tensor<ROW, COL> {
         }
 
         Tensor { data: result }
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        (ROW, COL)
     }
 
     pub fn softmax(&self) -> Tensor<ROW, COL> {
@@ -93,7 +98,6 @@ impl<const ROW: usize, const COL: usize> Tensor<ROW, COL> {
     }
 
     pub fn backward(&self) {
-        println!("{}x{}", ROW, COL);
         assert!(
             ROW == 1 && COL == 1,
             "Back Propagation on non-scaler Tensor is not allowed."
@@ -102,8 +106,31 @@ impl<const ROW: usize, const COL: usize> Tensor<ROW, COL> {
         self.data[0][0].back_prop();
     }
 
+    pub fn zero_grad(&self) {
+        for i in 0..ROW {
+            for j in 0..COL {
+                self.data[i][j].zero_grad();
+            }
+        }
+    }
+
+    pub fn step(&self, learning_rate: f32) {
+        for i in 0..ROW {
+            for j in 0..COL {
+                let mut inner = self.data[i][j].inner.lock().unwrap();
+
+                inner.data -= learning_rate * inner.grad;
+            }
+        }
+    }
+
+    pub fn data(&self) -> f32 {
+        assert!(ROW == 1 && COL == 1, "Dim must be 1x1");
+
+        self.data[0][0].inner.lock().unwrap().data
+    }
+
     pub fn graph(&self) -> String {
-        println!("{}x{}", ROW, COL);
         assert!(ROW == 1 && COL == 1, "Cannot graph n-d tensors");
 
         self.data[0][0]._graph()
@@ -122,5 +149,25 @@ impl<const ROW: usize, const COL: usize> Display for Tensor<ROW, COL> {
         }
 
         write!(f, "{}", display_text)
+    }
+}
+
+impl<const ROW: usize, const COL: usize> TryFrom<Vec<Tensor<1, COL>>> for Tensor<ROW, COL> {
+    type Error = &'static str;
+
+    fn try_from(vec_2d: Vec<Tensor<1, COL>>) -> Result<Self, Self::Error> {
+        if vec_2d.len() != ROW {
+            panic!("Vector row count does not match with Tensor row count.");
+        }
+
+        let mut row_iter = vec_2d.into_iter();
+
+        let data: [[Value; COL]; ROW] = array::from_fn(|_| {
+            let single_tensor = row_iter.next().unwrap();
+            let [actual_row] = single_tensor.data;
+            actual_row
+        });
+
+        Ok(Tensor { data })
     }
 }

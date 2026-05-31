@@ -1,31 +1,44 @@
 mod engine;
-use engine::tensor::Tensor;
-use engine::value::Value;
+mod loaders;
+mod models;
+
+use loaders::data::DataLoader;
+use models::bigram::Bigram;
 
 fn main() {
-    // const ROW: usize = 2;
-    // const COL: usize = 1;
-    let b = Tensor::<2, 2>::new([
-        [Value::new(6.0), Value::new(5.0)],
-        [Value::new(6.0), Value::new(5.0)],
-    ]);
-    let a = Tensor::<2, 2>::new([
-        [Value::new(-2.0), Value::new(-2.0)],
-        [Value::new(0.0), Value::new(-2.0)],
-    ]);
+    const BATCH_SIZE: usize = 1000;
 
-    let c = b.matmul(a);
-    println!("Data:\n{}", c);
+    let loader = DataLoader::load_data("./dataset.txt").unwrap();
+    let learning_rate = 0.01;
+    let epoch = 1000;
+    let steps = loader.total_steps::<BATCH_SIZE>();
+    let model = Bigram::<BATCH_SIZE, 30>::new();
 
-    let c = c.softmax();
-    let target = Tensor::<2, 2>::new([
-        [Value::new(1.0), Value::new(0.0)],
-        [Value::new(0.0), Value::new(1.0)],
-    ]);
+    println!("Total Steps = {steps}");
 
-    let loss = c.cross_entropy(target);
-    loss.backward();
+    for i in 0..epoch {
+        let mut step_loss: f32 = 0.0;
+        for step in 0..steps {
+            let (train_x, train_y) = loader.load_batches::<BATCH_SIZE>(step);
 
-    let dot = loss.graph();
-    std::fs::write("graph.dot", dot).unwrap();
+            let out = model.forward(train_x);
+            let loss = out.cross_entropy(train_y);
+
+            model.weights.zero_grad();
+            loss.backward();
+            model.weights.step(learning_rate);
+
+            step_loss += loss.data();
+            println!("Loss = {loss}");
+
+            // if step % 100 == 0 {
+            //     println!("Loss = {loss}");
+            // }
+        }
+
+        step_loss /= steps as f32;
+        if i % 100 == 0 {
+            println!("Step Loss = {step_loss}");
+        }
+    }
 }

@@ -5,3 +5,9 @@ edition = "2024"
 
 [dependencies]
 rand = "0.8"
+
+[profile.release]
+opt-level = 3         # Maximum optimization (this is default for release, but good to be explicit)
+lto = "fat"           # Link Time Optimization: allows cross-crate inlining (huge for math)
+codegen-units = 1     # Gives LLVM the entire program at once to find the best optimizations
+panic = "abort"       # Removes panic-unwinding overhead, making the binary smaller and slightly faster

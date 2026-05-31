@@ -126,13 +126,13 @@ impl Value {
         let out = self.inner.lock().unwrap().data.tanh();
         let out_value = Value::new(out);
 
-        let out_inner = Arc::clone(&out_value.inner);
-        let self_inner = Arc::clone(&self.inner);
+        let out_inner = Arc::downgrade(&out_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
 
         let backward = move || {
-            let out_grad = out_inner.lock().unwrap().grad;
-            let tanh_deriv = 1.0 - out_inner.lock().unwrap().data.powi(2);
-            self_inner.lock().unwrap().grad += out_grad * tanh_deriv;
+            let out_grad = out_inner.upgrade().unwrap().lock().unwrap().grad;
+            let tanh_deriv = 1.0 - out_inner.upgrade().unwrap().lock().unwrap().data.powi(2);
+            self_inner.upgrade().unwrap().lock().unwrap().grad += out_grad * tanh_deriv;
         };
 
         {
@@ -149,12 +149,23 @@ impl Value {
         let out = self.inner.lock().unwrap().data.powi(exp);
         let out_value = Value::new(out);
 
-        let out_inner = Arc::clone(&out_value.inner);
-        let self_inner = Arc::clone(&self.inner);
+        let out_inner = Arc::downgrade(&out_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
 
         let backward = move || {
-            let pow_deriv = (exp as f32) * self_inner.lock().unwrap().data.powi(exp - 1);
-            self_inner.lock().unwrap().grad = pow_deriv * out_inner.lock().unwrap().grad;
+            let pow_deriv = (exp as f32)
+                * self_inner
+                    .upgrade()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .data
+                    .powi(exp - 1);
+
+            let out_inner_arc = out_inner.upgrade().unwrap();
+
+            self_inner.upgrade().unwrap().lock().unwrap().grad =
+                pow_deriv * out_inner_arc.lock().unwrap().grad;
         };
 
         {
@@ -171,12 +182,14 @@ impl Value {
         let out = self.inner.lock().unwrap().data.exp();
         let out_value = Value::new(out);
 
-        let out_inner = Arc::clone(&out_value.inner);
-        let self_inner = Arc::clone(&self.inner);
+        let out_inner = Arc::downgrade(&out_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
 
         let backward = move || {
             let exp_deriv = out;
-            self_inner.lock().unwrap().grad = exp_deriv * out_inner.lock().unwrap().grad;
+            let out_inner_arc = out_inner.upgrade().unwrap();
+            self_inner.upgrade().unwrap().lock().unwrap().grad =
+                exp_deriv * out_inner_arc.lock().unwrap().grad;
         };
 
         {
@@ -193,12 +206,13 @@ impl Value {
         let out = self.inner.lock().unwrap().data.ln();
         let out_value = Value::new(out);
 
-        let out_inner = Arc::clone(&out_value.inner);
-        let self_inner = Arc::clone(&self.inner);
+        let out_inner = Arc::downgrade(&out_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
 
         let backward = move || {
-            let ln_deriv = 1.0 / self_inner.lock().unwrap().data;
-            self_inner.lock().unwrap().grad = ln_deriv * out_inner.lock().unwrap().grad;
+            let ln_deriv = 1.0 / self_inner.upgrade().unwrap().lock().unwrap().data;
+            self_inner.upgrade().unwrap().lock().unwrap().grad =
+                ln_deriv * out_inner.upgrade().unwrap().lock().unwrap().grad;
         };
 
         {
@@ -243,14 +257,14 @@ impl Add for Value {
         let data = self.inner.lock().unwrap().data + rhs.inner.lock().unwrap().data;
         let new_value = Value::new(data);
 
-        let self_inner = Arc::clone(&self.inner);
-        let rhs_inner = Arc::clone(&rhs.inner);
-        let new_value_inner = Arc::clone(&new_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
+        let rhs_inner = Arc::downgrade(&rhs.inner);
+        let new_value_inner = Arc::downgrade(&new_value.inner);
 
         let backward = move || {
-            let new_value_grad = new_value_inner.lock().unwrap().grad;
-            self_inner.lock().unwrap().grad += new_value_grad;
-            rhs_inner.lock().unwrap().grad += new_value_grad;
+            let new_value_grad = new_value_inner.upgrade().unwrap().lock().unwrap().grad;
+            self_inner.upgrade().unwrap().lock().unwrap().grad += new_value_grad;
+            rhs_inner.upgrade().unwrap().lock().unwrap().grad += new_value_grad;
         };
 
         {
@@ -275,15 +289,15 @@ impl Sub for Value {
         let data = a - b;
         let new_value = Value::new(data);
 
-        let self_inner = Arc::clone(&self.inner);
-        let rhs_inner = Arc::clone(&rhs.inner);
-        let new_value_inner = Arc::clone(&new_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
+        let rhs_inner = Arc::downgrade(&rhs.inner);
+        let new_value_inner = Arc::downgrade(&new_value.inner);
 
         let backward = move || {
-            let new_grad = new_value_inner.lock().unwrap().grad;
+            let new_grad = new_value_inner.upgrade().unwrap().lock().unwrap().grad;
 
-            self_inner.lock().unwrap().grad += new_grad;
-            rhs_inner.lock().unwrap().grad -= new_grad;
+            self_inner.upgrade().unwrap().lock().unwrap().grad += new_grad;
+            rhs_inner.upgrade().unwrap().lock().unwrap().grad -= new_grad;
         };
 
         {
@@ -306,17 +320,17 @@ impl Mul for Value {
         let data = self.inner.lock().unwrap().data * rhs.inner.lock().unwrap().data;
         let new_value = Value::new(data);
 
-        let self_inner = Arc::clone(&self.inner);
-        let rhs_inner = Arc::clone(&rhs.inner);
-        let new_value_inner = Arc::clone(&new_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
+        let rhs_inner = Arc::downgrade(&rhs.inner);
+        let new_value_inner = Arc::downgrade(&new_value.inner);
 
         let backward = move || {
-            let new_grad = new_value_inner.lock().unwrap().grad;
-            let self_data = self_inner.lock().unwrap().data;
-            let rhs_data = rhs_inner.lock().unwrap().data;
+            let new_grad = new_value_inner.upgrade().unwrap().lock().unwrap().grad;
+            let self_data = self_inner.upgrade().unwrap().lock().unwrap().data;
+            let rhs_data = rhs_inner.upgrade().unwrap().lock().unwrap().data;
 
-            self_inner.lock().unwrap().grad += new_grad * rhs_data;
-            rhs_inner.lock().unwrap().grad += new_grad * self_data;
+            self_inner.upgrade().unwrap().lock().unwrap().grad += new_grad * rhs_data;
+            rhs_inner.upgrade().unwrap().lock().unwrap().grad += new_grad * self_data;
         };
 
         {
@@ -340,17 +354,18 @@ impl Div for Value {
         let data = self.inner.lock().unwrap().data / rhs.inner.lock().unwrap().data;
         let new_value = Value::new(data);
 
-        let self_inner = Arc::clone(&self.inner);
-        let rhs_inner = Arc::clone(&rhs.inner);
-        let new_value_inner = Arc::clone(&new_value.inner);
+        let self_inner = Arc::downgrade(&self.inner);
+        let rhs_inner = Arc::downgrade(&rhs.inner);
+        let new_value_inner = Arc::downgrade(&new_value.inner);
 
         let backward = move || {
-            let new_grad = new_value_inner.lock().unwrap().grad;
-            let self_data = self_inner.lock().unwrap().data;
-            let rhs_data = rhs_inner.lock().unwrap().data;
+            let new_grad = new_value_inner.upgrade().unwrap().lock().unwrap().grad;
+            let self_data = self_inner.upgrade().unwrap().lock().unwrap().data;
+            let rhs_data = rhs_inner.upgrade().unwrap().lock().unwrap().data;
 
-            self_inner.lock().unwrap().grad += new_grad * (1.0 / rhs_data);
-            rhs_inner.lock().unwrap().grad += new_grad * (-self_data / rhs_data.powi(2));
+            self_inner.upgrade().unwrap().lock().unwrap().grad += new_grad * (1.0 / rhs_data);
+            rhs_inner.upgrade().unwrap().lock().unwrap().grad +=
+                new_grad * (-self_data / rhs_data.powi(2));
         };
 
         {
